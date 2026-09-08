@@ -1,7 +1,7 @@
 """
 build_stock_dataset.py
 
-Builds a wide stock dataset for a dashboard, using ONLY yfinance.
+Builds a wide stock dataset for a dashboard, using yfinance.
 
 Pipeline:
   1. Screen global + US exchanges for candidate companies (yf.screen).
@@ -44,7 +44,7 @@ MIN_PRICE = 5                   # Exclude penny stocks
 CONVERT_TO_USD = True           # Add *_USD columns for price/fundamentals using historical FX
 INCLUDE_FUNDAMENTALS = True     # Set False to skip the slower per-ticker .info calls
 
-FUNDAMENTALS_WORKERS = 8        # Threads for per-ticker fundamentals lookups
+FUNDAMENTALS_WORKERS = 3        # Threads for per-ticker fundamentals lookups
 COUNTRY_CHECK_WORKERS = 10      # Threads for resolving "home" exchange on multi-listed names
 
 OUTPUT_UNIVERSE_FILE = "stock_universe.csv"
@@ -839,11 +839,34 @@ print(f"Price history failed: {len(failed)}")
 # 9. FUNDAMENTALS (VALUATION / GROWTH / QUALITY / DIVIDENDS / ANALYSTS)
 # ============================================================
 
+import time
+import random
+
+MAX_RETRIES = 5
+BASE_DELAY = 5  # seconds
+
 def fetch_fundamentals(ticker):
-    try:
-        info = yf.Ticker(ticker).info
-    except Exception as e:
-        return {"Ticker": ticker, "_fundamentals_error": str(e)}
+    for attempt in range(MAX_RETRIES):
+        try:
+            info = yf.Ticker(ticker).info
+
+            if not info or len(info) <= 1:
+                raise ValueError("Empty info response (likely rate limited)")
+
+            # small polite delay so we don't immediately hammer the next ticker
+            time.sleep(0.25 + random.uniform(0, 0.25))
+            break
+
+        except Exception as e:
+            if attempt == MAX_RETRIES - 1:
+                return {"Ticker": ticker, "_fundamentals_error": str(e)}
+            wait = BASE_DELAY * (2 ** attempt) + random.uniform(0, 2)
+            print(f"    {ticker}: retry {attempt + 1}/{MAX_RETRIES} after {wait:.1f}s ({e})")
+            time.sleep(wait)
+
+    def g(key):
+        return info.get(key)
+    # ... rest of your function unchanged
 
     def g(key):
         return info.get(key)
